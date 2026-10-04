@@ -1,0 +1,49 @@
+name: Generate Catalina 10.15
+
+on:
+  workflow_dispatch:
+    inputs:
+      build:
+        type: choice
+        description: "Catalina build"
+        required: true
+        default: "19H15"
+        options:
+          - "19H15"
+          - "19H4"
+          - "19H2"
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 360
+    steps:
+      - name: Free disk space
+        run: |
+          df -h
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /Users/runner/Library/Android || true
+          df -h
+
+      - name: Install mist-cli
+        run: brew install mist-cli
+
+      - name: List matching installers
+        run: mist list installer "10.15.7" || mist list installer "Catalina"
+
+      - name: Download Catalina ISO
+        run: |
+          mkdir -p "$HOME/Desktop"
+          sudo mist download installer "${{ github.event.inputs.build }}" iso \
+            --output-directory "$HOME/Desktop" \
+            --iso-name "Catalina.iso" \
+            --force
+          ls -lh "$HOME/Desktop"
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macOS-Catalina-10.15.7
+          path: ~/Desktop/Catalina.iso
+          if-no-files-found: error
+          retention-days: 5
