@@ -8,6 +8,7 @@ on:
         description: "macOS Version"
         required: true
         options:
+          - Catalina v10.15.7
           - Tahoe v26.6.2
           - Sequoia v15.7.9
           - Sonoma v14.8.9
