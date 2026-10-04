@@ -2,48 +2,77 @@ name: Generate Catalina 10.15
 
 on:
   workflow_dispatch:
-    inputs:
-      build:
-        type: choice
-        description: "Catalina build"
-        required: true
-        default: "19H15"
-        options:
-          - "19H15"
-          - "19H4"
-          - "19H2"
 
 jobs:
   build:
-    runs-on: macos-15-intel
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-13, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     steps:
-      - name: Free disk space
+      - name: Show runner
         run: |
-          df -h
-          sudo rm -rf /usr/local/lib/android || true
-          sudo rm -rf /Users/runner/Library/Android || true
-          df -h
+          uname -m
+          sw_vers
+          df -h /
 
-      - name: Install mist-cli
+      - name: Try softwareupdate Catalina
+        id: su
+        continue-on-error: true
+        run: |
+          set -e
+          softwareupdate --list-full-installers || true
+          softwareupdate --fetch-full-installer --full-installer-version 10.15.7
+          ls -ld "/Applications/Install macOS Catalina.app"
+
+      - name: Install mist-cli fallback
+        if: steps.su.outcome != 'success'
         run: brew install mist-cli
 
-      - name: List matching installers
-        run: mist list installer "10.15.7" || mist list installer "Catalina"
-
-      - name: Download Catalina ISO
+      - name: mist download application
+        if: steps.su.outcome != 'success'
         run: |
-          mkdir -p "$HOME/Desktop"
-          sudo mist download installer "${{ github.event.inputs.build }}" iso \
-            --output-directory "$HOME/Desktop" \
-            --iso-name "Catalina.iso" \
+          set -e
+          mkdir -p "$HOME/output" /tmp/mist-cache
+          # Prefer application then create ISO ourselves
+          sudo mist download installer "19H15" application \
+            --output-directory "$HOME/output" \
+            --application-name "Install macOS Catalina.app" \
+            --temporary-directory /tmp/mist-cache \
+            --cache-downloads \
             --force
-          ls -lh "$HOME/Desktop"
+          # Move into /Applications expected path if needed
+          if [ ! -d "/Applications/Install macOS Catalina.app" ]; then
+            sudo ditto "$HOME/output/Install macOS Catalina.app" "/Applications/Install macOS Catalina.app"
+          fi
+          ls -ld "/Applications/Install macOS Catalina.app"
+
+      - name: Create ISO with createinstallmedia
+        run: |
+          set -e
+          APP="/Applications/Install macOS Catalina.app"
+          test -d "$APP"
+          sudo hdiutil create -o /tmp/Catalina -size 16384m -volname Catalina -layout SPUD -fs HFS+J
+          sudo hdiutil attach /tmp/Catalina.dmg -noverify -mountpoint /Volumes/Catalina
+          sleep 5
+          sudo "$APP/Contents/Resources/createinstallmedia" --volume /Volumes/Catalina --nointeraction
+          sleep 30
+          # eject install volume(s)
+          hdiutil info
+          diskutil list
+          for mp in "/Volumes/Install macOS Catalina" "/Volumes/Catalina"; do
+            if [ -d "$mp" ]; then hdiutil eject -force "$mp" || true; fi
+          done
+          hdiutil convert /tmp/Catalina.dmg -format UDTO -o "$HOME/Catalina"
+          mv -v "$HOME/Catalina.cdr" "$HOME/Catalina.iso"
+          ls -lh "$HOME/Catalina.iso"
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
-          name: macOS-Catalina-10.15.7
-          path: ~/Desktop/Catalina.iso
+          name: macOS-Catalina-10.15.7-${{ matrix.runner }}
+          path: ~/Catalina.iso
           if-no-files-found: error
           retention-days: 5
